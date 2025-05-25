@@ -1,5 +1,4 @@
 ﻿const express = require('express');
-const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 require('dotenv').config();
@@ -7,10 +6,8 @@ require('dotenv').config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// In-memory key-value store
-const userStore = {};
+const userStore = {}; // In-memory key-value store
 
-// Webhook route for incoming WhatsApp messages
 app.post('/webhook', async (req, res) => {
   const userMessage = req.body.Body?.trim();
   const fromNumber = req.body.From;
@@ -20,25 +17,30 @@ app.post('/webhook', async (req, res) => {
   let replyMessage = '';
 
   try {
+    // Handle set command
     if (userMessage?.toLowerCase().startsWith("set ")) {
       const [, key, ...valueParts] = userMessage.split(" ");
       const value = valueParts.join(" ");
       if (!key || !value) {
-        replyMessage = "❗ Please use: set <key> <value>";
+        replyMessage = "❗ Usage: set <key> <value>";
       } else {
         if (!userStore[fromNumber]) userStore[fromNumber] = {};
         userStore[fromNumber][key.toLowerCase()] = value;
         replyMessage = `✅ Set ${key} = ${value}`;
       }
+
+    // Handle get command
     } else if (userMessage?.toLowerCase().startsWith("get ")) {
       const [, key] = userMessage.split(" ");
       if (!key) {
-        replyMessage = "❗ Please provide a key. Example: get name";
+        replyMessage = "❗ Usage: get <key>";
       } else if (userStore[fromNumber]?.[key.toLowerCase()]) {
         replyMessage = `🔍 ${key} = ${userStore[fromNumber][key.toLowerCase()]}`;
       } else {
         replyMessage = `⚠️ No value found for "${key}"`;
       }
+
+    // Handle OpenAI GPT-4 response
     } else {
       const openaiResponse = await axios.post(
         'https://api.openai.com/v1/chat/completions',
@@ -56,14 +58,14 @@ app.post('/webhook', async (req, res) => {
       replyMessage = openaiResponse.data.choices[0].message.content;
     }
 
-    // Format the numbers
+    // Format numbers
     const to = fromNumber.startsWith("whatsapp:") ? fromNumber : `whatsapp:${fromNumber}`;
     const from = process.env.TWILIO_NUMBER;
 
     const payload = new URLSearchParams({
       Body: replyMessage,
       From: from,
-      To: to,
+      To: to
     });
 
     console.log("📤 Payload to Twilio:", payload.toString());
@@ -74,7 +76,7 @@ app.post('/webhook', async (req, res) => {
       {
         auth: {
           username: process.env.TWILIO_SID,
-          password: process.env.TWILIO_AUTH_TOKEN,
+          password: process.env.TWILIO_AUTH_TOKEN
         }
       }
     );
@@ -82,19 +84,16 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
   } catch (error) {
     console.error("❌ Error handling message:", error.message);
-
-    // ✅ Print Twilio's detailed error response
     if (error.response?.data) {
       console.error("🔍 Twilio response:", JSON.stringify(error.response.data, null, 2));
     } else {
-      console.error("⚠️ No detailed error from Twilio.");
+      console.error("⚠️ No Twilio response body");
     }
-
     res.sendStatus(500);
   }
 });
 
-// Use Render-compatible dynamic port
+// Use dynamic port for Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Bot is running on port ${PORT}`);
