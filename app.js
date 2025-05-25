@@ -6,19 +6,19 @@ require('dotenv').config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// 🧠 In-memory store
+// In-memory store for each user
 const userStore = {};
 
-// ✅ Webhook route for Twilio
+// Webhook endpoint for Twilio to call
 app.post('/webhook', async (req, res) => {
   const userMessage = req.body.Body?.trim();
   const fromNumber = req.body.From;
-
-  console.log("Incoming message:", userMessage, "From:", fromNumber);
+  console.log("Incoming message:", userMessage, "| From:", fromNumber);
 
   let replyMessage = '';
 
   try {
+    // Handle "set" command
     if (userMessage?.toLowerCase().startsWith("set ")) {
       const [, key, ...valueParts] = userMessage.split(" ");
       const value = valueParts.join(" ");
@@ -29,6 +29,8 @@ app.post('/webhook', async (req, res) => {
         userStore[fromNumber][key.toLowerCase()] = value;
         replyMessage = `✅ Set ${key} = ${value}`;
       }
+
+    // Handle "get" command
     } else if (userMessage?.toLowerCase().startsWith("get ")) {
       const [, key] = userMessage.split(" ");
       if (!key) {
@@ -38,32 +40,41 @@ app.post('/webhook', async (req, res) => {
       } else {
         replyMessage = `⚠️ No value found for "${key}"`;
       }
+
+    // Otherwise, handle with OpenAI GPT
     } else {
-      // 💬 Use OpenAI to reply
       const openaiResponse = await axios.post(
         'https://api.openai.com/v1/chat/completions',
         {
           model: 'gpt-4',
-          messages: [{ role: 'user', content: userMessage }]
+          messages: [{ role: 'user', content: userMessage }],
         },
         {
           headers: {
             'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
           }
         }
       );
       replyMessage = openaiResponse.data.choices[0].message.content;
     }
 
-    // Send WhatsApp reply via Twilio
+    // Ensure 'To' and 'From' use proper format
+    const to = fromNumber.startsWith("whatsapp:") ? fromNumber : `whatsapp:${fromNumber}`;
+    const from = process.env.TWILIO_NUMBER;
+
+    const payload = new URLSearchParams({
+      Body: replyMessage,
+      From: from,
+      To: to
+    });
+
+    console.log("Payload to Twilio:", payload.toString());
+
+    // Send reply via Twilio
     await axios.post(
       `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_SID}/Messages.json`,
-      new URLSearchParams({
-        Body: replyMessage,
-        From: 'whatsapp:' + process.env.TWILIO_NUMBER,
-        To: fromNumber
-      }),
+      payload,
       {
         auth: {
           username: process.env.TWILIO_SID,
@@ -74,11 +85,14 @@ app.post('/webhook', async (req, res) => {
 
     res.sendStatus(200);
   } catch (error) {
-    console.error("Error handling message:", error.message);
+    console.error("❌ Error handling message:", error.message);
+    if (error.response?.data) {
+      console.error("🔍 Twilio response:", JSON.stringify(error.response.data, null, 2));
+    }
     res.sendStatus(500);
   }
 });
 
-// ✅ Use dynamic port for Render
+// Render-compatible port setup
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Bot is running on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Bot is running on port ${PORT}`));
